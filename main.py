@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 PLAYLIST_URL = os.getenv("PLAYLIST_URL", "https://www.oldie-antenne.de/programm/song-suche?channel=live")
 POLL_SECONDS = max(10, int(os.getenv("POLL_SECONDS", "15")))
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() in ("1", "true", "yes")
+TEST_QUEEN = os.getenv("TEST_QUEEN", "false").lower() in ("1", "true", "yes")
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
 META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "")
 META_API_VERSION = os.getenv("META_API_VERSION", "v23.0")
@@ -190,20 +191,35 @@ def handle_queen_row(row, now=None):
 
 def main():
     db_init()
-    log.info("Queen Watch gestartet; URL=%s; Poll=%ss; DRY_RUN=%s; max song age=%sm", PLAYLIST_URL, POLL_SECONDS, DRY_RUN, MAX_SONG_AGE_MINUTES)
+    log.info(
+        "Queen Watch gestartet; URL=%s; Poll=%ss; DRY_RUN=%s; max song age=%sm",
+        PLAYLIST_URL, POLL_SECONDS, DRY_RUN, MAX_SONG_AGE_MINUTES
+    )
+
+    if TEST_QUEEN:
+        test_row = {
+            "time": datetime.now(BERLIN).strftime("%H:%M"),
+            "title": "Queen Watch Test",
+            "artist": "Queen",
+        }
+        log.info("TEST: Simuliere einen aktuellen Queen-Titel.")
+        handle_queen_row(test_row)
+        log.info("TEST: Queen-Test abgeschlossen.")
+
     while True:
         try:
             rows = fetch_recent_rows()
-            log.info("Song-Historie gelesen: %d Einträge; neuester=%s – %s", len(rows), rows[0]["time"], rows[0]["title"])
-            # Only alert for recent Queen rows, not old historical plays from earlier in the day.
+            log.info(
+                "Song-Historie gelesen: %d Einträge; neuester=%s – %s",
+                len(rows), rows[0]["time"], rows[0]["title"]
+            )
             for row in rows:
                 if row["artist"].strip().casefold() == "queen":
                     handle_queen_row(row)
                     break
         except Exception:
-            log.exception("Überwachungsrunde fehlgeschlagen; nächster Versuch in %s Sekunden.", POLL_SECONDS)
+            log.exception(
+                "Überwachungsrunde fehlgeschlagen; nächster Versuch in %s Sekunden.",
+                POLL_SECONDS
+            )
         time.sleep(POLL_SECONDS)
-
-
-if __name__ == "__main__":
-    main()
