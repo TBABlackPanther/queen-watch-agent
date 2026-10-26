@@ -46,12 +46,13 @@ def fetch_recent_rows():
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
+
     log.info(
-    "DIAGNOSE: HTTP=%s, Typ=%s, Bytes=%s, Suchtext vorhanden=%s",
-    response.status_code,
-    response.headers.get("Content-Type"),
-    len(response.text),
-    "Gespielte Uhrzeit" in response.text,
+        "DIAGNOSE: HTTP=%s, Typ=%s, Bytes=%s, Suchtext vorhanden=%s",
+        response.status_code,
+        response.headers.get("Content-Type"),
+        len(response.text),
+        "Gespielte Uhrzeit" in response.text,
     )
 
     rows = []
@@ -75,14 +76,12 @@ def fetch_recent_rows():
 
         time_text = match.group(1)
 
-        # Der Eintrag enthält meist Titel und Interpret.
         lines = [
             re.sub(r"\s+", " ", line).strip()
             for line in block.get_text("\n", strip=True).splitlines()
         ]
         lines = [line for line in lines if line]
 
-        # Titel und Interpret aus dem Eintrag herausfiltern.
         cleaned = []
         for line in lines:
             line = re.sub(r"^Image:\s*", "", line, flags=re.I)
@@ -109,13 +108,15 @@ def fetch_recent_rows():
             })
 
     if not rows:
-log.error("DIAGNOSE: Seiteninhalt: %s", soup.get_text(" ", strip=True)[:1200])
+        log.error(
+            "DIAGNOSE: Seiteninhalt: %s",
+            soup.get_text(" ", strip=True)[:1200],
+        )
         raise RuntimeError(
             "Keine Song-Einträge erkannt. "
             "HTML-Struktur der Playlist muss geprüft werden."
         )
 
-    # Neueste Uhrzeit zuerst.
     rows.sort(
         key=lambda row: (
             int(row["time"].split(":")[0]) * 60
@@ -125,6 +126,7 @@ log.error("DIAGNOSE: Seiteninhalt: %s", soup.get_text(" ", strip=True)[:1200])
     )
 
     return rows
+
 
 
 def clean_title(value):
