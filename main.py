@@ -109,7 +109,6 @@ def fetch_recent_rows():
     return rows
 
 
-
 def clean_title(value):
     value = re.sub(r"\s+", " ", value).strip(" -–—:|·")
     # Artwork captions often append the release year; keep only the song name.
