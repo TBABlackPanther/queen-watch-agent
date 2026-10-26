@@ -223,3 +223,7 @@ def main():
                 POLL_SECONDS
             )
         time.sleep(POLL_SECONDS)
+
+
+if __name__ == "__main__":
+    main()
