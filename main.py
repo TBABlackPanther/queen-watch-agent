@@ -109,7 +109,7 @@ def fetch_recent_rows():
             })
 
     if not rows:
-    log.error("DIAGNOSE: Seiteninhalt: %s", soup.get_text(" ", strip=True)[:1200])
+log.error("DIAGNOSE: Seiteninhalt: %s", soup.get_text(" ", strip=True)[:1200])
         raise RuntimeError(
             "Keine Song-Einträge erkannt. "
             "HTML-Struktur der Playlist muss geprüft werden."
