@@ -1,3 +1,4 @@
+
 import os
 import re
 import time
@@ -9,7 +10,10 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 
-PLAYLIST_URL = os.getenv("PLAYLIST_URL", "https://www.oldie-antenne.de/programm/song-suche?channel=live")
+PLAYLIST_URL = os.getenv(
+    "PLAYLIST_URL",
+    "https://www.oldie-antenne.de/programm/song-suche?channel=live",
+)
 POLL_SECONDS = max(10, int(os.getenv("POLL_SECONDS", "15")))
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() in ("1", "true", "yes")
 TEST_QUEEN = os.getenv("TEST_QUEEN", "false").lower() in ("1", "true", "yes")
@@ -18,16 +22,22 @@ META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "")
 META_API_VERSION = os.getenv("META_API_VERSION", "v23.0")
 RECIPIENT = os.getenv("WHATSAPP_RECIPIENT", "")
 DB_PATH = os.getenv("DB_PATH", "/var/data/queen_watch.sqlite3")
-MAX_SONG_AGE_MINUTES = max(1, int(os.getenv("MAX_SONG_AGE_MINUTES", "6")))
+MAX_SONG_AGE_MINUTES = max(
+    1, int(os.getenv("MAX_SONG_AGE_MINUTES", "6"))
+)
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(message)s",
+)
 log = logging.getLogger("queen-watch")
 
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "QueenWatch/1.1 (playlist monitoring)",
+    "User-Agent": "QueenWatch/1.2 (playlist monitoring)",
     "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
 })
+
 BERLIN = ZoneInfo("Europe/Berlin")
 
 
@@ -35,11 +45,17 @@ def db_init():
     folder = os.path.dirname(DB_PATH)
     if folder:
         os.makedirs(folder, exist_ok=True)
+
     with sqlite3.connect(DB_PATH) as con:
-        con.execute("""CREATE TABLE IF NOT EXISTS sent (
-            fingerprint TEXT PRIMARY KEY, title TEXT NOT NULL, played_at TEXT NOT NULL,
-            recorded_at TEXT NOT NULL, status TEXT NOT NULL
-        )""")
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS sent (
+                fingerprint TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                played_at TEXT NOT NULL,
+                recorded_at TEXT NOT NULL,
+                status TEXT NOT NULL
+            )
+        """)
 
 
 def fetch_recent_rows():
@@ -49,11 +65,19 @@ def fetch_recent_rows():
     soup = BeautifulSoup(response.text, "html.parser")
     page_text = soup.get_text(" ", strip=True)
 
+    marker_count = len(
+        re.findall(
+            r"Gespielte Uhrzeit\s*\d{1,2}:\d{2}",
+            page_text,
+            re.I,
+        )
+    )
+
     log.info(
         "DIAGNOSE: HTTP=%s, Bytes=%s, Song-Zeitmarker=%s",
         response.status_code,
         len(response.text),
-        len(re.findall(r"Gespielte Uhrzeit\s*\d{1,2}:\d{2}", page_text, re.I)),
+        marker_count,
     )
 
     rows = []
@@ -69,7 +93,7 @@ def fetch_recent_rows():
         time_text = match.group(1)
         entry = re.sub(r"\s+", " ", match.group(2)).strip()
 
-        # Bevorzugt das Format: Titel (Jahr) Interpret
+        # Bevorzugtes Format: Titel (Jahr) Interpret.
         song_match = re.match(
             r"(.+?)\s+\(((?:19|20)\d{2})\)\s+(.+?)\s*$",
             entry,
@@ -79,8 +103,7 @@ def fetch_recent_rows():
             title = clean_title(song_match.group(1).strip())
             artist = song_match.group(3).strip()
         else:
-            # Fallback: Eintrag ohne Jahr, wenn der Text mit
-            # einem bekannten Künstler endet.
+            # Fallback für Einträge ohne Jahresangabe.
             fallback = re.match(
                 r"(.+?)\s+("
                 r"Queen|Freddie Mercury|"
@@ -89,6 +112,7 @@ def fetch_recent_rows():
                 entry,
                 re.I,
             )
+
             if not fallback:
                 log.warning(
                     "Song-Eintrag konnte nicht zerlegt werden: %s",
@@ -106,12 +130,15 @@ def fetch_recent_rows():
                 "artist": artist,
             })
 
+    # Wichtig: Die Website kann während eines Stundenwechsels
+    # vorübergehend leer sein. Das ist kein Ausnahmefehler.
     if not rows:
-        log.error(
-            "DIAGNOSE: Keine Songs zerlegt. Seitentext: %s",
-            page_text[:1600],
+        log.info(
+            "Playlist momentan leer oder keine Songdaten verfügbar. "
+            "Nächster Prüfversuch in %s Sekunden.",
+            POLL_SECONDS,
         )
-        raise RuntimeError("Keine Song-Einträge erkannt.")
+        return []
 
     rows.sort(
         key=lambda row: (
@@ -127,24 +154,33 @@ def fetch_recent_rows():
 
 def clean_title(value):
     value = re.sub(r"\s+", " ", value).strip(" -–—:|·")
-    # Artwork captions often append the release year; keep only the song name.
     value = re.sub(r"\s*\((?:19|20)\d{2}\)\s*$", "", value)
     return value[:180].strip()
 
 
 def plausible_title(value):
     return 1 < len(value) <= 180 and not re.fullmatch(
-        r"(Queen|Song-Suche|Live|Startseite|OLDIE ANTENNE|Gespielte Uhrzeit)", value, re.I
+        r"(Queen|Song-Suche|Live|Startseite|OLDIE ANTENNE|Gespielte Uhrzeit)",
+        value,
+        re.I,
     )
 
 
 def played_datetime(time_text, now=None):
     now = now or datetime.now(BERLIN)
     hour, minute = map(int, time_text.split(":"))
-    played = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    # A listed time slightly in the future is likely from the previous day around midnight.
+
+    played = now.replace(
+        hour=hour,
+        minute=minute,
+        second=0,
+        microsecond=0,
+    )
+
+    # Ein Zeitstempel geringfügig in der Zukunft kann zum Vortag gehören.
     if played > now + timedelta(minutes=2):
         played -= timedelta(days=1)
+
     return played
 
 
@@ -155,59 +191,136 @@ def fingerprint(title, played_at):
 
 def send_whatsapp(message):
     if DRY_RUN:
-        log.info("DRY_RUN: Nachricht würde gesendet werden: %s", message)
+        log.info(
+            "DRY_RUN: Nachricht würde gesendet werden: %s",
+            message,
+        )
         return "dry-run"
+
     if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
-        raise RuntimeError("META_ACCESS_TOKEN und META_PHONE_NUMBER_ID müssen als Render Environment Variables gesetzt sein.")
+        raise RuntimeError(
+            "META_ACCESS_TOKEN und META_PHONE_NUMBER_ID müssen "
+            "als Render Environment Variables gesetzt sein."
+        )
+
     to = re.sub(r"\D", "", RECIPIENT)
+
     if not to or to.startswith("0"):
-        raise RuntimeError("WHATSAPP_RECIPIENT muss eine bestätigte WhatsApp-Empfängernummer im internationalen Format ohne + sein, z. B. 49... .")
-    url = f"https://graph.facebook.com/{META_API_VERSION}/{META_PHONE_NUMBER_ID}/messages"
+        raise RuntimeError(
+            "WHATSAPP_RECIPIENT muss eine bestätigte WhatsApp-Nummer "
+            "im internationalen Format ohne + enthalten, z. B. 49..."
+        )
+
+    url = (
+        f"https://graph.facebook.com/"
+        f"{META_API_VERSION}/{META_PHONE_NUMBER_ID}/messages"
+    )
+
     payload = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
         "to": to,
         "type": "text",
-        "text": {"preview_url": False, "body": message},
+        "text": {
+            "preview_url": False,
+            "body": message,
+        },
     }
-    response = requests.post(url, headers={
-        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
-        "Content-Type": "application/json",
-    }, json=payload, timeout=20)
+
+    response = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=20,
+    )
+
     if not response.ok:
-        raise RuntimeError(f"Meta WhatsApp API Fehler {response.status_code}: {response.text[:400]}")
+        # Token oder Telefonnummer niemals in Logs ausgeben.
+        raise RuntimeError(
+            f"Meta WhatsApp API Fehler {response.status_code}: "
+            f"{response.text[:400]}"
+        )
+
     return response.json()
 
 
 def handle_queen_row(row, now=None):
     if row["artist"].strip().casefold() != "queen":
         return
+
     now = now or datetime.now(BERLIN)
     played_at = played_datetime(row["time"], now)
     age = (now - played_at).total_seconds() / 60
+
     if age < -1 or age > MAX_SONG_AGE_MINUTES:
-        log.info("Queen-Eintrag ist nicht frisch genug (%s, %.1f Minuten alt); keine Meldung.", row["time"], age)
+        log.info(
+            "Queen-Eintrag ist nicht frisch genug "
+            "(%s, %.1f Minuten alt); keine Meldung.",
+            row["time"],
+            age,
+        )
         return
+
     fp = fingerprint(row["title"], played_at)
+
     with sqlite3.connect(DB_PATH) as con:
-        if con.execute("SELECT 1 FROM sent WHERE fingerprint=?", (fp,)).fetchone():
-            log.info("Titel bereits gemeldet: Queen - %s (%s)", row["title"], row["time"])
-            return
+        already_sent = con.execute(
+            "SELECT 1 FROM sent WHERE fingerprint = ?",
+            (fp,),
+        ).fetchone()
+
+    if already_sent:
+        log.info(
+            "Titel bereits gemeldet: Queen - %s (%s)",
+            row["title"],
+            row["time"],
+        )
+        return
+
     message = f"Jetzt läuft gerade Queen - {row['title']}"
     result = send_whatsapp(message)
+
     with sqlite3.connect(DB_PATH) as con:
-        con.execute("INSERT OR IGNORE INTO sent VALUES (?, ?, ?, ?, ?)", (
-            fp, row["title"], played_at.isoformat(), datetime.now(timezone.utc).isoformat(),
-            "dry-run" if result == "dry-run" else "sent",
-        ))
-    log.info("Queen-Titel verarbeitet: %s (%s), Status=%s", row["title"], row["time"], result if isinstance(result, str) else "accepted by Meta API")
+        con.execute(
+            "INSERT OR IGNORE INTO sent "
+            "(fingerprint, title, played_at, recorded_at, status) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                fp,
+                row["title"],
+                played_at.isoformat(),
+                datetime.now(timezone.utc).isoformat(),
+                "dry-run" if result == "dry-run" else "sent",
+            ),
+        )
+
+    status = (
+        result
+        if isinstance(result, str)
+        else "accepted by Meta API"
+    )
+
+    log.info(
+        "Queen-Titel verarbeitet: %s (%s), Status=%s",
+        row["title"],
+        row["time"],
+        status,
+    )
 
 
 def main():
     db_init()
+
     log.info(
-        "Queen Watch gestartet; URL=%s; Poll=%ss; DRY_RUN=%s; max song age=%sm",
-        PLAYLIST_URL, POLL_SECONDS, DRY_RUN, MAX_SONG_AGE_MINUTES
+        "Queen Watch gestartet; URL=%s; Poll=%ss; "
+        "DRY_RUN=%s; max song age=%sm",
+        PLAYLIST_URL,
+        POLL_SECONDS,
+        DRY_RUN,
+        MAX_SONG_AGE_MINUTES,
     )
 
     if TEST_QUEEN:
@@ -216,6 +329,7 @@ def main():
             "title": "Queen Watch Test",
             "artist": "Queen",
         }
+
         log.info("TEST: Simuliere einen aktuellen Queen-Titel.")
         handle_queen_row(test_row)
         log.info("TEST: Queen-Test abgeschlossen.")
@@ -223,19 +337,31 @@ def main():
     while True:
         try:
             rows = fetch_recent_rows()
+
+            # Leere Playlist normal behandeln und erneut prüfen.
+            if not rows:
+                time.sleep(POLL_SECONDS)
+                continue
+
             log.info(
                 "Song-Historie gelesen: %d Einträge; neuester=%s – %s",
-                len(rows), rows[0]["time"], rows[0]["title"]
+                len(rows),
+                rows[0]["time"],
+                rows[0]["title"],
             )
+
             for row in rows:
                 if row["artist"].strip().casefold() == "queen":
                     handle_queen_row(row)
                     break
+
         except Exception:
             log.exception(
-                "Überwachungsrunde fehlgeschlagen; nächster Versuch in %s Sekunden.",
-                POLL_SECONDS
+                "Überwachungsrunde fehlgeschlagen; "
+                "nächster Versuch in %s Sekunden.",
+                POLL_SECONDS,
             )
+
         time.sleep(POLL_SECONDS)
 
 
