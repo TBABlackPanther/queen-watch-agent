@@ -58,7 +58,7 @@ def fetch_recent_rows():
 
     rows = []
 
-    # Text zwischen zwei Zeitmarkern als einzelnen Song-Eintrag lesen.
+    # Jeden Eintrag zwischen zwei Zeitmarkern auslesen.
     pattern = re.compile(
         r"Gespielte Uhrzeit\s*(\d{1,2}:\d{2})\s*(.*?)"
         r"(?=Gespielte Uhrzeit|Infos|Nutzungsbedingungen|$)",
@@ -67,26 +67,37 @@ def fetch_recent_rows():
 
     for match in pattern.finditer(page_text):
         time_text = match.group(1)
-        entry = match.group(2).strip()
+        entry = re.sub(r"\s+", " ", match.group(2)).strip()
 
-        # Titel und Interpret anhand der Jahreszahl trennen.
-        # Titel und Interpret anhand des Jahres in Klammern trennen.
+        # Bevorzugt das Format: Titel (Jahr) Interpret
         song_match = re.match(
             r"(.+?)\s+\(((?:19|20)\d{2})\)\s+(.+?)\s*$",
             entry,
         )
 
-        if not song_match:
-            log.warning(
-                "Song-Eintrag konnte nicht zerlegt werden: %s",
-                entry[:160],
+        if song_match:
+            title = clean_title(song_match.group(1).strip())
+            artist = song_match.group(3).strip()
+        else:
+            # Fallback: Eintrag ohne Jahr, wenn der Text mit
+            # einem bekannten Künstler endet.
+            fallback = re.match(
+                r"(.+?)\s+("
+                r"Queen|Freddie Mercury|"
+                r"[\wÀ-ÿ'.& -]+"
+                r")$",
+                entry,
+                re.I,
             )
-            continue
+            if not fallback:
+                log.warning(
+                    "Song-Eintrag konnte nicht zerlegt werden: %s",
+                    entry[:160],
+                )
+                continue
 
-        title = clean_title(
-            song_match.group(1).strip() + " (" + song_match.group(2) + ")"
-        )
-        artist = song_match.group(3).strip()
+            title = clean_title(fallback.group(1))
+            artist = fallback.group(2).strip()
 
         if plausible_title(title) and artist:
             rows.append({
@@ -96,7 +107,10 @@ def fetch_recent_rows():
             })
 
     if not rows:
-        log.error("DIAGNOSE: Keine Songs zerlegt. Seitentext: %s", page_text[:1600])
+        log.error(
+            "DIAGNOSE: Keine Songs zerlegt. Seitentext: %s",
+            page_text[:1600],
+        )
         raise RuntimeError("Keine Song-Einträge erkannt.")
 
     rows.sort(
@@ -107,7 +121,7 @@ def fetch_recent_rows():
         reverse=True,
     )
 
-    log.info("Playlist erkannt: %s", rows[:3])
+    log.info("Playlist erkannt: %s", rows[:6])
     return rows
 
 
