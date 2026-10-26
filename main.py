@@ -46,6 +46,13 @@ def fetch_recent_rows():
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
+log.info(
+    "DIAGNOSE: HTTP=%s, Typ=%s, Bytes=%s, Suchtext vorhanden=%s",
+    response.status_code,
+    response.headers.get("Content-Type"),
+    len(response.text),
+    "Gespielte Uhrzeit" in response.text,
+)
 
     rows = []
 
@@ -102,6 +109,7 @@ def fetch_recent_rows():
             })
 
     if not rows:
+log.error("DIAGNOSE: Seiteninhalt: %s", soup.get_text(" ", strip=True)[:1200])
         raise RuntimeError(
             "Keine Song-Einträge erkannt. "
             "HTML-Struktur der Playlist muss geprüft werden."
