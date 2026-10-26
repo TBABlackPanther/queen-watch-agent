@@ -1,0 +1,23 @@
+services:
+  - type: worker
+    name: queen-watch-oldie-antenne
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    autoDeploy: false
+    envVars:
+      - key: PLAYLIST_URL
+        value: https://www.oldie-antenne.de/programm/song-suche?channel=live
+      - key: POLL_SECONDS
+        value: "15"
+      - key: MAX_SONG_AGE_MINUTES
+        value: "6"
+      - key: DRY_RUN
+        value: "true"
+      - key: WHATSAPP_RECIPIENT
+        value: ""
+      - key: META_API_VERSION
+        value: v23.0
+      - key: DB_PATH
+        value: /var/data/queen_watch.sqlite3
