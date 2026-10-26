@@ -42,33 +42,80 @@ def db_init():
 
 
 def fetch_recent_rows():
-    response = session.get(PLAYLIST_URL, timeout=20)
+    response = session.get(PLAYLIST_URL, timeout=(8, 30))
     response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
-    for node in soup(["script", "style", "noscript", "svg"]):
-        node.decompose()
-    lines = [re.sub(r"\s+", " ", x).strip() for x in soup.get_text("\n", strip=True).splitlines()]
-    lines = [x for x in lines if x]
-    if len(lines) < 10:
-        raise RuntimeError("Die Song-Suche enthält zu wenig lesbaren Text; möglicherweise hat sich die Seite geändert.")
 
-    # The public page lists recent entries as: played time, title, artist.
+    soup = BeautifulSoup(response.text, "html.parser")
+
     rows = []
-    for i, line in enumerate(lines):
-        match = re.search(r"Gespielte Uhrzeit\s+(\d{1,2}:\d{2})", line, re.I)
+
+    # Song-Einträge anhand ihrer sichtbaren Uhrzeit finden.
+    for node in soup.find_all(string=re.compile(r"Gespielte Uhrzeit", re.I)):
+        parent = node.parent
+        block = parent.parent if parent and parent.parent else parent
+
+        if not block:
+            continue
+
+        text = block.get_text(" ", strip=True)
+        match = re.search(
+            r"Gespielte Uhrzeit\s*(\d{1,2}:\d{2})",
+            text,
+            re.I,
+        )
         if not match:
             continue
+
         time_text = match.group(1)
-        title = lines[i + 1] if i + 1 < len(lines) else ""
-        artist = lines[i + 2] if i + 2 < len(lines) else ""
-        if not title or not artist:
+
+        # Der Eintrag enthält meist Titel und Interpret.
+        lines = [
+            re.sub(r"\s+", " ", line).strip()
+            for line in block.get_text("\n", strip=True).splitlines()
+        ]
+        lines = [line for line in lines if line]
+
+        # Titel und Interpret aus dem Eintrag herausfiltern.
+        cleaned = []
+        for line in lines:
+            line = re.sub(r"^Image:\s*", "", line, flags=re.I)
+            if re.fullmatch(
+                r"Gespielte Uhrzeit\s*\d{1,2}:\d{2}",
+                line,
+                re.I,
+            ):
+                continue
+            if line not in cleaned:
+                cleaned.append(line)
+
+        if len(cleaned) < 2:
             continue
-        title = clean_title(title)
-        artist = re.sub(r"\s+", " ", artist).strip()
-        if plausible_title(title):
-            rows.append({"time": time_text, "title": title, "artist": artist})
+
+        title = clean_title(cleaned[-2])
+        artist = cleaned[-1].strip()
+
+        if plausible_title(title) and artist:
+            rows.append({
+                "time": time_text,
+                "title": title,
+                "artist": artist,
+            })
+
     if not rows:
-        raise RuntimeError("Keine Song-Einträge mit 'Gespielte Uhrzeit' erkannt; Parser muss geprüft werden.")
+        raise RuntimeError(
+            "Keine Song-Einträge erkannt. "
+            "HTML-Struktur der Playlist muss geprüft werden."
+        )
+
+    # Neueste Uhrzeit zuerst.
+    rows.sort(
+        key=lambda row: (
+            int(row["time"].split(":")[0]) * 60
+            + int(row["time"].split(":")[1])
+        ),
+        reverse=True,
+    )
+
     return rows
 
 
