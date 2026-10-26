@@ -46,59 +46,45 @@ def fetch_recent_rows():
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
+    page_text = soup.get_text(" ", strip=True)
 
     log.info(
-        "DIAGNOSE: HTTP=%s, Typ=%s, Bytes=%s, Suchtext vorhanden=%s",
+        "DIAGNOSE: HTTP=%s, Bytes=%s, Song-Zeitmarker=%s",
         response.status_code,
-        response.headers.get("Content-Type"),
         len(response.text),
-        "Gespielte Uhrzeit" in response.text,
+        len(re.findall(r"Gespielte Uhrzeit\s*\d{1,2}:\d{2}", page_text, re.I)),
     )
 
     rows = []
 
-    # Song-Einträge anhand ihrer sichtbaren Uhrzeit finden.
-    for node in soup.find_all(string=re.compile(r"Gespielte Uhrzeit", re.I)):
-        parent = node.parent
-        block = parent.parent if parent and parent.parent else parent
+    # Text zwischen zwei Zeitmarkern als einzelnen Song-Eintrag lesen.
+    pattern = re.compile(
+        r"Gespielte Uhrzeit\s*(\d{1,2}:\d{2})\s*(.*?)"
+        r"(?=Gespielte Uhrzeit|Infos|Nutzungsbedingungen|$)",
+        re.I,
+    )
 
-        if not block:
-            continue
-
-        text = block.get_text(" ", strip=True)
-        match = re.search(
-            r"Gespielte Uhrzeit\s*(\d{1,2}:\d{2})",
-            text,
-            re.I,
-        )
-        if not match:
-            continue
-
+    for match in pattern.finditer(page_text):
         time_text = match.group(1)
+        entry = match.group(2).strip()
 
-        lines = [
-            re.sub(r"\s+", " ", line).strip()
-            for line in block.get_text("\n", strip=True).splitlines()
-        ]
-        lines = [line for line in lines if line]
+        # Titel und Interpret anhand der Jahreszahl trennen.
+        song_match = re.match(
+            r"(.+?)\s+((?:19|20)\d{2})\s+(.+?)\s*$",
+            entry,
+        )
 
-        cleaned = []
-        for line in lines:
-            line = re.sub(r"^Image:\s*", "", line, flags=re.I)
-            if re.fullmatch(
-                r"Gespielte Uhrzeit\s*\d{1,2}:\d{2}",
-                line,
-                re.I,
-            ):
-                continue
-            if line not in cleaned:
-                cleaned.append(line)
-
-        if len(cleaned) < 2:
+        if not song_match:
+            log.warning(
+                "Song-Eintrag konnte nicht zerlegt werden: %s",
+                entry[:160],
+            )
             continue
 
-        title = clean_title(cleaned[-2])
-        artist = cleaned[-1].strip()
+        title = clean_title(
+            song_match.group(1).strip() + " (" + song_match.group(2) + ")"
+        )
+        artist = song_match.group(3).strip()
 
         if plausible_title(title) and artist:
             rows.append({
@@ -108,14 +94,8 @@ def fetch_recent_rows():
             })
 
     if not rows:
-        log.error(
-            "DIAGNOSE: Seiteninhalt: %s",
-            soup.get_text(" ", strip=True)[:1200],
-        )
-        raise RuntimeError(
-            "Keine Song-Einträge erkannt. "
-            "HTML-Struktur der Playlist muss geprüft werden."
-        )
+        log.error("DIAGNOSE: Keine Songs zerlegt. Seitentext: %s", page_text[:1600])
+        raise RuntimeError("Keine Song-Einträge erkannt.")
 
     rows.sort(
         key=lambda row: (
@@ -125,6 +105,7 @@ def fetch_recent_rows():
         reverse=True,
     )
 
+    log.info("Playlist erkannt: %s", rows[:3])
     return rows
 
 
