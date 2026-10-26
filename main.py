@@ -69,10 +69,10 @@ def fetch_recent_rows():
         entry = match.group(2).strip()
 
         # Titel und Interpret anhand der Jahreszahl trennen.
-        song_match = re.match(
-            r"(.+?)\s+((?:19|20)\d{2})\s+(.+?)\s*$",
-            entry,
-        )
+       song_match = re.match(
+        r"(.+?)\s+\(((?:19|20)\d{2})\)\s+(.+?)\s*$",
+        entry,
+    )
 
         if not song_match:
             log.warning(
